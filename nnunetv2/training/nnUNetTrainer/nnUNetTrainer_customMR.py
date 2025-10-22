@@ -37,6 +37,34 @@ class nnUNetTrainer_2000epochs_LRdecay(nnUNetTrainer):
         lr_scheduler = PolyLRScheduler(optimizer, self.initial_lr, 5000, exponent=10)
         return optimizer, lr_scheduler
     
+class nnUNetTrainer_5000LRdecay(nnUNetTrainer):
+    # same as nnUNetTrainer_2000epochs_LRdecay
+    def __init__(
+        self,
+        plans: dict,
+        configuration: str,
+        fold: int,
+        dataset_json: dict,
+        device: torch.device = torch.device("cuda"),
+    ):
+        super(nnUNetTrainer_5000LRdecay, self).__init__(
+            plans, configuration, fold, dataset_json, device
+        )
+        self.num_epochs = 2000
+        self.num_iterations_per_epoch = 250
+        self.num_val_iterations_per_epoch = 100
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.SGD(
+            self.network.parameters(),
+            self.initial_lr,
+            weight_decay=self.weight_decay,
+            momentum=0.99,
+            nesterov=True,
+        )
+        lr_scheduler = PolyLRScheduler(optimizer, self.initial_lr, 5000, exponent=10)
+        return optimizer, lr_scheduler
+
 class nnUNetTrainer_1000epochs_LRdecay(nnUNetTrainer):
     def __init__(
         self,
