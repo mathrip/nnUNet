@@ -1366,17 +1366,39 @@ class nnUNetTrainer(object):
             self.on_epoch_start()
 
             self.on_train_epoch_start()
+
+            # ADDED by MR: save batches
+            saved_data = {} # added by MR
+            saved_data['dataloader_train'] = [] # added by MR
+            saved_data['dataloader_val'] = [] # added by MR
+
             train_outputs = []
             for batch_id in range(self.num_iterations_per_epoch):
-                train_outputs.append(self.train_step(next(self.dataloader_train)))
+                batch_train = next(self.dataloader_train)
+                saved_data['dataloader_train'].append({
+                    'data': batch_train['data'].cpu(),  # added by MR
+                    'target': [b.cpu() for b in batch_train['target']] # added by MR
+                })
+                train_outputs.append(self.train_step(batch_train))
+           
             self.on_train_epoch_end(train_outputs)
-
+            
+            
             with torch.no_grad():
                 self.on_validation_epoch_start()
                 val_outputs = []
                 for batch_id in range(self.num_val_iterations_per_epoch):
-                    val_outputs.append(self.validation_step(next(self.dataloader_val)))
+                    batch_val = next(self.dataloader_val)
+                    saved_data['dataloader_val'].append({
+                    'data': batch_val['data'].cpu(),  # added by MR
+                    'target': [b.cpu() for b in batch_val['target']] # added by MR
+                })
+                    val_outputs.append(self.validation_step(batch_val))
                 self.on_validation_epoch_end(val_outputs)
+
+            os.makedirs(join(self.output_folder, 'tmp'), exist_ok=True)  # added by MR
+            save_path = join(self.output_folder, 'tmp', f'trainval_batches_epoch_{epoch}.pt') # added by MR
+            torch.save(saved_data, save_path) # added by MR
 
             self.on_epoch_end()
 
