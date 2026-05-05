@@ -23,8 +23,8 @@ class nnUNetTrainer_2000epochs_LRdecay(nnUNetTrainer):
             plans, configuration, fold, dataset_json, device
         )
         self.num_epochs = 2000
-        self.num_iterations_per_epoch = 250
-        self.num_val_iterations_per_epoch = 100
+        # self.num_iterations_per_epoch = 250
+        # self.num_val_iterations_per_epoch = 100
 
     def configure_optimizers(self):
         optimizer = torch.optim.SGD(
@@ -51,8 +51,8 @@ class nnUNetTrainer_5000LRdecay(nnUNetTrainer):
             plans, configuration, fold, dataset_json, device
         )
         self.num_epochs = 2000
-        self.num_iterations_per_epoch = 250
-        self.num_val_iterations_per_epoch = 100
+        # self.num_iterations_per_epoch = 250
+        # self.num_val_iterations_per_epoch = 100
 
     def configure_optimizers(self):
         optimizer = torch.optim.SGD(
@@ -78,8 +78,8 @@ class nnUNetTrainer_1000epochs_LRdecay(nnUNetTrainer):
             plans, configuration, fold, dataset_json, device
         )
         self.num_epochs = 1000
-        self.num_iterations_per_epoch = 250
-        self.num_val_iterations_per_epoch = 100
+        # self.num_iterations_per_epoch = 250
+        # self.num_val_iterations_per_epoch = 100
 
     def configure_optimizers(self):
         optimizer = torch.optim.SGD(
@@ -105,8 +105,8 @@ class nnUNetTrainer_2000epochs_LRdecay4000e16(nnUNetTrainer):
             plans, configuration, fold, dataset_json, device
         )
         self.num_epochs = 2000
-        self.num_iterations_per_epoch = 250
-        self.num_val_iterations_per_epoch = 100
+        # self.num_iterations_per_epoch = 250
+        # self.num_val_iterations_per_epoch = 100
 
     def configure_optimizers(self):
         optimizer = torch.optim.SGD(
