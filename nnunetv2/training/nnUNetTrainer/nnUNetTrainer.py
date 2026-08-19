@@ -66,45 +66,6 @@ from nnunetv2.utilities.helpers import empty_cache, dummy_context
 from nnunetv2.utilities.label_handling.label_handling import convert_labelmap_to_one_hot, determine_num_input_channels
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
-#### TO REMOVE - ADDED BY MR
-import monai
-class DeepSupervisionLossWrapper(torch.nn.Module):
-        def __init__(self, base_loss):
-            super(DeepSupervisionLossWrapper, self).__init__()
-            self.base_loss = base_loss
-
-        def forward(self, inputs, targets):
-            if isinstance(inputs, (list, tuple)):
-                n = len(inputs)
-                # initialise deep supervision weights
-                weights = torch.tensor([1 / (2 ** i) for i in range(n)],device=inputs[0].device,dtype=inputs[0].dtype,)
-                # normalise to sum to 1
-                weights[-1] = 0 # to reproduce nnunet deep supervision, no weight on the lowest 2 layers
-                weights = weights / weights.sum() 
-                # print(weights)
-
-                total_loss = 0.0
-                for input, w, target in zip(inputs, weights, targets):
-                    total_loss += self.base_loss(input, target) * w
-                                    
-                return total_loss
-            else:
-                return self.base_loss(inputs, targets)
-
-def get_downsampled_labels_ds(labels, deep_supr_num, strides):
-    labels_ds = [labels]
-    if deep_supr_num == 0:
-        return labels_ds
-
-    label = labels
-    scales = [1,1,1]
-    for ds in range(deep_supr_num):
-        scales = scales/np.array(strides[ds+1])
-        new_shape = [round(i * j) for i, j in zip(label.shape[2:], scales)]
-        dtype = label.dtype
-        label_ds = torch.nn.functional.interpolate(label.float(), new_shape, mode='nearest-exact').to(dtype)
-        labels_ds.append(label_ds)
-    return labels_ds
 
 class nnUNetTrainer(object):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
@@ -936,24 +897,7 @@ class nnUNetTrainer(object):
 
         # dataloaders must be instantiated here (instead of __init__) because they need access to the training data
         # which may not be present  when doing inference
-        # self.dataloader_train, self.dataloader_val = self.get_dataloaders()
-
-        # ADDED from MR
-        from meld_find.config import configurations
-        from meld_find.data_loader import (load_dataset,split_dataset,Dataloader)
-        self.dataloader_train = None
-        self.dataloader_val = None
-        config = configurations['Dataset102_2000_LRdecay']
-        config['path_result'] = self.output_folder
-        inputs_path = os.path.join(config['path_input'], config['dataset_name'], 'imagesTr')
-        labels_path = os.path.join(config['path_input'], config['dataset_name'], 'labelsTr')
-        dataset = load_dataset(inputs_path, labels_path)
-        dataset_folds = split_dataset(dataset, config)
-        train_dict_list, val_dict_list = dataset_folds[config['FOLD']]
-        dataloader = Dataloader(config)
-        self.train_loader_random, self.train_loader_foreground =  dataloader.build_loader_trainval(train_dict_list[0:10], mode='train')
-        self.val_loader_random, self.val_loader_foreground =  dataloader.build_loader_trainval(val_dict_list[0:10], mode='val')
-
+        self.dataloader_train, self.dataloader_val = self.get_dataloaders()
 
         maybe_mkdir_p(self.output_folder)
 
@@ -1045,18 +989,6 @@ class nnUNetTrainer(object):
             output = self.network(data)
             # del data
             l = self.loss(output, target)
-        
-            ####################################
-            #  ADDED BY MR - NEED TO REMOVE
-            loss_monai = monai.losses.DiceCELoss(include_background=False, 
-                                            to_onehot_y=True,
-                                            softmax=True,
-                                            batch=False, # false in nnunet plan and preprocessing             
-                                            )
-            ds_loss = DeepSupervisionLossWrapper(loss_monai)
-            l_monai = ds_loss(output, target)
-            # print(l, l_monai)
-            ##################
 
         if self.grad_scaler is not None:
             self.grad_scaler.scale(l).backward()
@@ -1068,10 +1000,7 @@ class nnUNetTrainer(object):
             l.backward()
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
             self.optimizer.step()
-        return {
-            'loss': l.detach().cpu().numpy(), 
-            'l_monai': l_monai.detach().cpu().numpy()
-                }
+        return {'loss': l.detach().cpu().numpy()}
 
     def on_train_epoch_end(self, train_outputs: List[dict]):
         outputs = collate_outputs(train_outputs)
@@ -1082,10 +1011,8 @@ class nnUNetTrainer(object):
             loss_here = np.vstack(losses_tr).mean()
         else:
             loss_here = np.mean(outputs['loss'])
-            loss_monai_here =  np.mean(outputs['l_monai'])
 
         self.logger.log('train_losses', loss_here, self.current_epoch)
-        self.logger.log('train_losses_monai', loss_monai_here-1, self.current_epoch)
 
     def on_validation_epoch_start(self):
         self.network.eval()
@@ -1154,20 +1081,8 @@ class nnUNetTrainer(object):
             tp_hard = tp_hard[1:]
             fp_hard = fp_hard[1:]
             fn_hard = fn_hard[1:]
-        ####################################
-        #  ADDED BY MR - NEED TO REMOVE
-        dice_monai = monai.metrics.DiceMetric(
-                                include_background=False,  # Exclude background from Dice calculation
-                                reduction="mean",          # Compute mean Dice across classes
-                                num_classes=2,
-                                return_with_label=False,
-                                )
-        dice_monai(y_pred=predicted_segmentation_onehot, y=target)
-        batch_dice = dice_monai.aggregate().item()
-        ####################################
-        return {'loss': l.detach().cpu().numpy(), 'tp_hard': tp_hard, 'fp_hard': fp_hard, 'fn_hard': fn_hard, 
-                'dice_per_class_or_region_monai': [batch_dice], # ADDED BY MR need to remove
-                }
+
+        return {'loss': l.detach().cpu().numpy(), 'tp_hard': tp_hard, 'fp_hard': fp_hard, 'fn_hard': fn_hard}
 
     def on_validation_epoch_end(self, val_outputs: List[dict]):
         outputs_collated = collate_outputs(val_outputs)
@@ -1202,11 +1117,6 @@ class nnUNetTrainer(object):
         self.logger.log('dice_per_class_or_region', global_dc_per_class, self.current_epoch)
         self.logger.log('val_losses', loss_here, self.current_epoch)
 
-        ####################################
-        #  ADDED BY MR - NEED TO REMOVE
-        pseudo_dice =  np.mean(outputs_collated['dice_per_class_or_region_monai'], 0)
-        self.logger.log('dice_per_class_or_region_monai', pseudo_dice, self.current_epoch)
-
     def on_epoch_start(self):
         self.logger.log('epoch_start_timestamps', time(), self.current_epoch)
 
@@ -1214,12 +1124,9 @@ class nnUNetTrainer(object):
         self.logger.log('epoch_end_timestamps', time(), self.current_epoch)
 
         self.print_to_log_file('train_loss', np.round(self.logger.my_fantastic_logging['train_losses'][-1], decimals=4))
-        self.print_to_log_file('train_loss_monai', np.round(self.logger.my_fantastic_logging['train_losses_monai'][-1], decimals=4))
         self.print_to_log_file('val_loss', np.round(self.logger.my_fantastic_logging['val_losses'][-1], decimals=4))
         self.print_to_log_file('Pseudo dice', [np.round(i, decimals=4) for i in
                                                self.logger.my_fantastic_logging['dice_per_class_or_region'][-1]])
-        self.print_to_log_file('Pseudo dice monai', [np.round(i, decimals=4) for i in
-                                               self.logger.my_fantastic_logging['dice_per_class_or_region_monai']])
         self.print_to_log_file(
             f"Epoch time: {np.round(self.logger.my_fantastic_logging['epoch_end_timestamps'][-1] - self.logger.my_fantastic_logging['epoch_start_timestamps'][-1], decimals=2)} s")
 
@@ -1460,29 +1367,9 @@ class nnUNetTrainer(object):
 
             self.on_train_epoch_start()
 
-            # # ADDED by MR: save batches
-            saved_data = {} # added by MR
-            saved_data['dataloader_train'] = [] # added by MR
-            saved_data['dataloader_val'] = [] # added by MR
-
             train_outputs = []
             for batch_id in range(self.num_iterations_per_epoch):
-                #added by MR
-                batch_random = next(iter(self.train_loader_random))
-                batch_foreground = next(iter(self.train_loader_foreground))
-                data_train = torch.cat([batch_random["data"], batch_foreground["data"]], dim=0, ).to(self.device)
-                target_train = torch.cat([batch_random["target"], batch_foreground["target"]], dim=0)
-                target_train_ds = get_downsampled_labels_ds(target_train, 4, self.configuration_manager.network_arch_init_kwargs['strides'])
-                batch_train = {"data": data_train , 
-                         "target": target_train_ds}
-                # get labels downsampled for deep supervision, except if loading from saved training
-                
-                #####
-                # batch_train = next(self.dataloader_train)
-                # saved_data['dataloader_train'].append({
-                #     'data': batch_train['data'].cpu(),  # added by MR
-                #     'target': [b.cpu() for b in batch_train['target']] # added by MR
-                # })
+                batch_train = next(self.dataloader_train)
                 train_outputs.append(self.train_step(batch_train))
            
             self.on_train_epoch_end(train_outputs)
@@ -1493,17 +1380,9 @@ class nnUNetTrainer(object):
                 val_outputs = []
                 for batch_id in range(self.num_val_iterations_per_epoch):
                     batch_val = next(self.dataloader_val)
-                    saved_data['dataloader_val'].append({
-                    'data': batch_val['data'].cpu(),  # added by MR
-                    'target': [b.cpu() for b in batch_val['target']] # added by MR
-                })
                     val_outputs.append(self.validation_step(batch_val))
                 self.on_validation_epoch_end(val_outputs)
-
-            # os.makedirs(join(self.output_folder, 'tmp'), exist_ok=True)  # added by MR
-            # save_path = join(self.output_folder, 'tmp', f'trainval_batches_epoch_{epoch}.pt') # added by MR
-            # torch.save(saved_data, save_path) # added by MR
-
+                
             self.on_epoch_end()
 
         self.on_train_end()

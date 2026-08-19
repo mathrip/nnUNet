@@ -16,11 +16,11 @@ export nnUNet_results=/data1/mri24/meldfe_experiments/experiments_nnunet/nnUNet_
 from nnunetv2.run.run_training import run_training
 import torch
 
-dataset_name_or_id = '102'
+dataset_name_or_id = '110'
 configuration = '3d_fullres'
 fold = 0
-tr = 'nnUNetTrainer'
-# tr = 'nnUNetTrainer_1epoch'
+# tr = 'nnUNetTrainer'
+tr = 'nnUNetTrainer_1epoch'
 p = 'nnUNetPlans'
 pretrained_weights = None
 num_gpus = 1
